@@ -1,52 +1,30 @@
-# загружаем необходимые библиотеки
-import warnings
-
+from fastapi import FastAPI, Request
+import pickle
 import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
 
-warnings.filterwarnings("ignore")
+# загрузите модель из файла выше
+with open('model.pkl', 'rb') as model_file:
+    model = pickle.load(model_file)
 
-# загружаем датафрейм
-df = pd.read_csv("../discountuplift.csv", sep="\t")
+# создаём приложение FastAPI
+app = FastAPI(title="uplift")
 
-df["old_target"] = (df["target_class"] % 2).apply(int)
+@app.post("/predict")
+async def predict(request: Request):
 
-feature_cols = [
-    "recency",
-    "history",
-    "used_discount",
-    "used_bogo",
-    "is_referral",
-    "zip_code_Rural",
-    "zip_code_Surburban",
-    "zip_code_Urban",
-    "channel_Multichannel",
-    "channel_Phone",
-    "channel_Web",
-]
-target_col = "old_target"
-treatment_col = "treatment"
+		# все данные передаются в json
+    data = await request.json()
 
-# разобъём нашу выборку на тестовую и валидационную
-df_train, df_test = train_test_split(
-    df, stratify=df[[treatment_col, target_col]], random_state=1, test_size=0.25
-)
+		# признаки лежат в features, в массиве
+    # извлекаем и преобразуем признаки
+    features = data["features"]
+    features = np.array(features).reshape(1, -1)
 
-from causalml.inference.tree import UpliftTreeClassifier
+    # получаем предсказания
+    prediction = model.predict(features)[0][0]
 
-# создадим uplift-дерево
-uplift_model = UpliftTreeClassifier(
-    max_depth=5,
-    min_samples_leaf=200,
-    min_samples_treatment=50,
-    n_reg=100,
-    evaluationFunction="ED",
-    control_name="0",
-)
+    return {"predict": prediction.tolist()}
 
-uplift_model.fit(
-    df_train[feature_cols].values,
-    treatment=df_train[treatment_col].apply(str).values,
-    y=df_train[target_col].values,
-)
+if __name__ == '__main__':
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5000)
